@@ -1,24 +1,40 @@
 extends Node3D
 
 const Actors = preload("res://scripts/Actors.gd")
+const SAVE_PATH := "user://outpost_save.cfg"
 
 enum State { MENU, PLAYING, GAMEOVER }
 
 var _ready_done: bool = false
+var _match_active: bool = false
 var _state: State = State.MENU
 var _score: int = 0
+var _best_score: int = 0
+var _best_wave: int = 1
 var _kills: int = 0
 var _combo: int = 1
 var _combo_timer: float = 0.0
 var _wave: int = 1
 var _to_spawn: int = 0
 var _spawn_cd: float = 0.0
-var _high_quality: bool = false
+
+# Graphics & Gameplay Settings
+var _gfx_preset: int = 1 # 0=LOW, 1=BALANCED, 2=HIGH
+var _shadows_on: bool = true
+var _fog_on: bool = true
+var _msaa_on: bool = false
+var _fps_cap: int = 60
+var _show_fps: bool = true
+var _muted: bool = false
+var _sens_idx: int = 1 # 0=LOW, 1=MED, 2=HIGH
 
 var _arena: Node3D
 var _player: CharacterBody3D
 var _world_env: WorldEnvironment
 var _sun: DirectionalLight3D
+var _rim: DirectionalLight3D
+var _menu_cam: Camera3D
+var _menu_cam_angle: float = 0.0
 var _bots: Array[Node3D] = []
 var _pickups: Array[Node3D] = []
 var _grenades: Array[Dictionary] = []
@@ -35,6 +51,7 @@ var _ui: CanvasLayer
 var _loading_bg: ColorRect
 var _loading_lbl: Label
 var _menu_panel: PanelContainer
+var _gfx_panel: PanelContainer
 var _gameover_panel: PanelContainer
 var _hud: Control
 var _radar: Control
@@ -53,9 +70,20 @@ var _banner_timer: float = 0.0
 var _lbl_crit: Label
 var _crit_timer: float = 0.0
 var _lbl_final: Label
-var _btn_autofire: Button
-var _btn_quality: Button
+var _lbl_best: Label
 var _fire_btn_rect: Rect2
+
+var _btn_resume: Button
+var _btn_deploy: Button
+var _btn_autofire: Button
+var _btn_sens: Button
+var _btn_audio: Button
+var _btn_preset: Button
+var _btn_shadows: Button
+var _btn_fog: Button
+var _btn_msaa: Button
+var _btn_fpscap: Button
+var _btn_showfps: Button
 
 func _ready() -> void:
 	_ui = CanvasLayer.new()
@@ -76,6 +104,7 @@ func _ready() -> void:
 	_loading_lbl.add_theme_color_override("font_color", Color(1.0, 0.58, 0.20))
 	_loading_bg.add_child(_loading_lbl)
 
+	_load_settings()
 	await get_tree().process_frame
 	_setup_env()
 	_loading_lbl.text = "OUTPOST ZERO\nBuilding Poly Haven Street..."
@@ -85,9 +114,38 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_setup_pools()
 	_setup_ui()
+	_apply_graphics_settings()
 
 	_loading_bg.queue_free()
 	_ready_done = true
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_PATH) == OK:
+		_best_score = int(cfg.get_value("stats", "best_score", 0))
+		_best_wave = int(cfg.get_value("stats", "best_wave", 1))
+		_gfx_preset = int(cfg.get_value("gfx", "preset", 1))
+		_shadows_on = bool(cfg.get_value("gfx", "shadows", true))
+		_fog_on = bool(cfg.get_value("gfx", "fog", true))
+		_msaa_on = bool(cfg.get_value("gfx", "msaa", false))
+		_fps_cap = int(cfg.get_value("gfx", "fps_cap", 60))
+		_show_fps = bool(cfg.get_value("gfx", "show_fps", true))
+		_muted = bool(cfg.get_value("audio", "muted", false))
+		_sens_idx = int(cfg.get_value("ctrl", "sens", 1))
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("stats", "best_score", _best_score)
+	cfg.set_value("stats", "best_wave", _best_wave)
+	cfg.set_value("gfx", "preset", _gfx_preset)
+	cfg.set_value("gfx", "shadows", _shadows_on)
+	cfg.set_value("gfx", "fog", _fog_on)
+	cfg.set_value("gfx", "msaa", _msaa_on)
+	cfg.set_value("gfx", "fps_cap", _fps_cap)
+	cfg.set_value("gfx", "show_fps", _show_fps)
+	cfg.set_value("audio", "muted", _muted)
+	cfg.set_value("ctrl", "sens", _sens_idx)
+	cfg.save(SAVE_PATH)
 
 func _setup_env() -> void:
 	_sun = DirectionalLight3D.new()
@@ -99,12 +157,12 @@ func _setup_env() -> void:
 	_sun.directional_shadow_max_distance = 34.0
 	add_child(_sun)
 
-	var rim := DirectionalLight3D.new()
-	rim.rotation_degrees = Vector3(-35.0, -142.0, 0.0)
-	rim.light_color = Color(0.42, 0.62, 0.95)
-	rim.light_energy = 0.45
-	rim.shadow_enabled = false
-	add_child(rim)
+	_rim = DirectionalLight3D.new()
+	_rim.rotation_degrees = Vector3(-35.0, -142.0, 0.0)
+	_rim.light_color = Color(0.42, 0.62, 0.95)
+	_rim.light_energy = 0.45
+	_rim.shadow_enabled = false
+	add_child(_rim)
 
 	var sky := Sky.new()
 	var pmat := ProceduralSkyMaterial.new()
@@ -133,6 +191,15 @@ func _setup_env() -> void:
 	_world_env.environment = env
 	add_child(_world_env)
 
+	_menu_cam = Camera3D.new()
+	_menu_cam.fov = 62.0
+	_menu_cam.near = 0.2
+	_menu_cam.far = 140.0
+	_menu_cam.position = Vector3(14.0, 6.8, 14.0)
+	add_child(_menu_cam)
+	_menu_cam.look_at(Vector3(0, 1.4, 0), Vector3.UP)
+	_menu_cam.current = true
+
 func _setup_world() -> void:
 	_arena = Actors.ArenaBuilder.new()
 	_arena.build_arena()
@@ -148,6 +215,7 @@ func _setup_world() -> void:
 	add_child(_player)
 	_player.setup_visual(_arena.get_blob_texture())
 	_player.reset_player()
+	_menu_cam.current = true
 
 func _setup_pools() -> void:
 	var t_mesh := BoxMesh.new()
@@ -226,7 +294,7 @@ func _setup_ui() -> void:
 
 	var btn_pause := Button.new()
 	btn_pause.text = " ☰ "; btn_pause.custom_minimum_size = Vector2(54, 42)
-	btn_pause.pressed.connect(func(): _state = State.MENU; _hud.visible = false; _menu_panel.visible = true)
+	btn_pause.pressed.connect(_open_pause_menu)
 	top_bar.add_child(btn_pause)
 
 	var RadarScript := load("res://scripts/RadarWidget.gd")
@@ -312,38 +380,97 @@ func _setup_ui() -> void:
 	fire_lbl.add_theme_font_size_override("font_size", 22)
 	fire_panel.add_child(fire_lbl)
 
-	_menu_panel = _make_panel(); _ui.add_child(_menu_panel)
+	# --- MAIN MENU PANEL ---
+	_menu_panel = _make_panel(540); _ui.add_child(_menu_panel)
 	var mv := _menu_panel.get_node("VBox") as VBoxContainer
 	var title := Label.new()
 	title.text = "OUTPOST ZERO"; title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 38); title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.18))
+	title.add_theme_font_size_override("font_size", 36); title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.18))
 	mv.add_child(title)
 
-	var sub := Label.new()
-	sub.text = "Quaternius CC0 Animations • Poly Haven Sunset • ElevenLabs SFX"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; sub.add_theme_font_size_override("font_size", 14)
-	mv.add_child(sub)
+	_lbl_best = Label.new()
+	_lbl_best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_best.add_theme_font_size_override("font_size", 15)
+	_lbl_best.add_theme_color_override("font_color", Color(0.80, 0.90, 1.0))
+	mv.add_child(_lbl_best)
 
-	_btn_autofire = Button.new(); _btn_autofire.text = "AUTO-FIRE ASSIST: ON"; _btn_autofire.custom_minimum_size = Vector2(0, 48)
-	_btn_autofire.pressed.connect(func():
-		_player.auto_fire_assist = not _player.auto_fire_assist
-		_btn_autofire.text = "AUTO-FIRE ASSIST: " + ("ON" if _player.auto_fire_assist else "OFF (Manual)")
-	)
-	mv.add_child(_btn_autofire)
+	_btn_resume = Button.new()
+	_btn_resume.text = "RESUME MATCH"
+	_btn_resume.custom_minimum_size = Vector2(0, 50)
+	_btn_resume.visible = false
+	_btn_resume.pressed.connect(_resume_match)
+	mv.add_child(_btn_resume)
 
-	_btn_quality = Button.new(); _btn_quality.text = "SHADOWS: ON (Standard)"; _btn_quality.custom_minimum_size = Vector2(0, 48)
-	_btn_quality.pressed.connect(func():
-		_high_quality = not _high_quality
-		_sun.shadow_enabled = not _high_quality
-		_btn_quality.text = "SHADOWS: " + ("OFF (Max FPS)" if _high_quality else "ON (Standard)")
-	)
-	mv.add_child(_btn_quality)
+	_btn_deploy = Button.new()
+	_btn_deploy.text = "PLAY"
+	_btn_deploy.custom_minimum_size = Vector2(0, 54)
+	_btn_deploy.add_theme_font_size_override("font_size", 22)
+	_btn_deploy.pressed.connect(_start_match)
+	mv.add_child(_btn_deploy)
 
-	var btn_play := Button.new(); btn_play.text = "ENTER DOWNTOWN BLOCK"; btn_play.custom_minimum_size = Vector2(0, 60)
-	btn_play.add_theme_font_size_override("font_size", 22); btn_play.pressed.connect(_start_match)
-	mv.add_child(btn_play)
+	var btn_gfx := Button.new()
+	btn_gfx.text = "GRAPHICS SETTINGS"
+	btn_gfx.custom_minimum_size = Vector2(0, 46)
+	btn_gfx.pressed.connect(func(): _menu_panel.visible = false; _gfx_panel.visible = true)
+	mv.add_child(btn_gfx)
 
-	_gameover_panel = _make_panel(); _gameover_panel.visible = false; _ui.add_child(_gameover_panel)
+	var ctrl_row := HBoxContainer.new()
+	ctrl_row.add_theme_constant_override("separation", 8)
+	mv.add_child(ctrl_row)
+
+	_btn_autofire = Button.new(); _btn_autofire.custom_minimum_size = Vector2(0, 44); _btn_autofire.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_autofire.pressed.connect(func(): _player.auto_fire_assist = not _player.auto_fire_assist; _refresh_menu_labels())
+	ctrl_row.add_child(_btn_autofire)
+
+	_btn_sens = Button.new(); _btn_sens.custom_minimum_size = Vector2(0, 44); _btn_sens.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_sens.pressed.connect(func(): _sens_idx = (_sens_idx + 1) % 3; _apply_graphics_settings(); _save_settings())
+	ctrl_row.add_child(_btn_sens)
+
+	_btn_audio = Button.new(); _btn_audio.custom_minimum_size = Vector2(0, 44)
+	_btn_audio.pressed.connect(func(): _muted = not _muted; _apply_graphics_settings(); _save_settings())
+	mv.add_child(_btn_audio)
+
+	# --- GRAPHICS SETTINGS PANEL ---
+	_gfx_panel = _make_panel(540); _gfx_panel.visible = false; _ui.add_child(_gfx_panel)
+	var gv_set := _gfx_panel.get_node("VBox") as VBoxContainer
+	var gfx_title := Label.new()
+	gfx_title.text = "GRAPHICS SETTINGS"; gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	gfx_title.add_theme_font_size_override("font_size", 28); gfx_title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.18))
+	gv_set.add_child(gfx_title)
+
+	_btn_preset = Button.new(); _btn_preset.custom_minimum_size = Vector2(0, 46)
+	_btn_preset.pressed.connect(_cycle_preset)
+	gv_set.add_child(_btn_preset)
+
+	var g_row1 := HBoxContainer.new(); g_row1.add_theme_constant_override("separation", 8); gv_set.add_child(g_row1)
+	_btn_shadows = Button.new(); _btn_shadows.custom_minimum_size = Vector2(0, 44); _btn_shadows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_shadows.pressed.connect(func(): _shadows_on = not _shadows_on; _apply_graphics_settings(); _save_settings())
+	g_row1.add_child(_btn_shadows)
+
+	_btn_fog = Button.new(); _btn_fog.custom_minimum_size = Vector2(0, 44); _btn_fog.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_fog.pressed.connect(func(): _fog_on = not _fog_on; _apply_graphics_settings(); _save_settings())
+	g_row1.add_child(_btn_fog)
+
+	var g_row2 := HBoxContainer.new(); g_row2.add_theme_constant_override("separation", 8); gv_set.add_child(g_row2)
+	_btn_msaa = Button.new(); _btn_msaa.custom_minimum_size = Vector2(0, 44); _btn_msaa.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_msaa.pressed.connect(func(): _msaa_on = not _msaa_on; _apply_graphics_settings(); _save_settings())
+	g_row2.add_child(_btn_msaa)
+
+	_btn_fpscap = Button.new(); _btn_fpscap.custom_minimum_size = Vector2(0, 44); _btn_fpscap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_btn_fpscap.pressed.connect(func(): _fps_cap = 30 if _fps_cap == 60 else 60; _apply_graphics_settings(); _save_settings())
+	g_row2.add_child(_btn_fpscap)
+
+	_btn_showfps = Button.new(); _btn_showfps.custom_minimum_size = Vector2(0, 44)
+	_btn_showfps.pressed.connect(func(): _show_fps = not _show_fps; _apply_graphics_settings(); _save_settings())
+	gv_set.add_child(_btn_showfps)
+
+	var btn_back := Button.new(); btn_back.text = "SAVE & BACK"; btn_back.custom_minimum_size = Vector2(0, 48)
+	btn_back.add_theme_font_size_override("font_size", 18)
+	btn_back.pressed.connect(func(): _save_settings(); _gfx_panel.visible = false; _menu_panel.visible = true)
+	gv_set.add_child(btn_back)
+
+	# --- GAME OVER PANEL ---
+	_gameover_panel = _make_panel(520); _gameover_panel.visible = false; _ui.add_child(_gameover_panel)
 	var gv := _gameover_panel.get_node("VBox") as VBoxContainer
 	var go_lbl := Label.new(); go_lbl.text = "WASTED"; go_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	go_lbl.add_theme_font_size_override("font_size", 40); go_lbl.add_theme_color_override("font_color", Color(0.95, 0.20, 0.20))
@@ -352,133 +479,19 @@ func _setup_ui() -> void:
 	_lbl_final = Label.new(); _lbl_final.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; _lbl_final.add_theme_font_size_override("font_size", 22)
 	gv.add_child(_lbl_final)
 
-	var btn_retry := Button.new(); btn_retry.text = "RESPAWN"; btn_retry.custom_minimum_size = Vector2(0, 58)
+	var btn_retry := Button.new(); btn_retry.text = "RESPAWN"; btn_retry.custom_minimum_size = Vector2(0, 52)
 	btn_retry.pressed.connect(_start_match)
 	gv.add_child(btn_retry)
 
-func _add_action_btn(txt: String, offset_br: Vector2, sz: Vector2, cb: Callable) -> void:
-	var b := Button.new(); b.text = txt; b.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	b.offset_left = offset_br.x; b.offset_right = offset_br.x + sz.x
-	b.offset_top = offset_br.y; b.offset_bottom = offset_br.y + sz.y
-	b.pressed.connect(cb); _hud.add_child(b)
+	var btn_go_menu := Button.new(); btn_go_menu.text = "MAIN MENU"; btn_go_menu.custom_minimum_size = Vector2(0, 46)
+	btn_go_menu.pressed.connect(_return_to_title)
+	gv.add_child(btn_go_menu)
 
-func _make_panel() -> PanelContainer:
-	var p := PanelContainer.new(); p.set_anchors_preset(Control.PRESET_CENTER)
-	p.custom_minimum_size = Vector2(580, 0); p.grow_horizontal = Control.GROW_DIRECTION_BOTH; p.grow_vertical = Control.GROW_DIRECTION_BOTH
-	var sb := StyleBoxFlat.new(); sb.bg_color = Color(0.08, 0.09, 0.12, 0.90)
-	sb.border_color = Color(1.0, 0.55, 0.18, 0.9); sb.set_border_width_all(2); sb.set_corner_radius_all(14); sb.set_content_margin_all(24)
-	p.add_theme_stylebox_override("panel", sb)
-	var v := VBoxContainer.new(); v.name = "VBox"; v.add_theme_constant_override("separation", 12); p.add_child(v)
-	return p
+	_refresh_menu_labels()
 
-func _start_match() -> void:
-	for b in _bots:
-		if is_instance_valid(b): b.queue_free()
-	_bots.clear()
-	for s in _shot_pool: s["life"] = 0.0; s["node"].visible = false
-	for tr in _tracer_pool: tr["life"] = 0.0; tr["node"].visible = false
-	for pk in _pickups: pk.queue_free()
-	_pickups.clear()
-	for g in _grenades: g["node"].queue_free()
-	_grenades.clear()
-	_arena.spawn_barrels(); _player.reset_player()
-	_score = 0; _kills = 0; _combo = 1; _combo_timer = 0.0; _wave = 1
-	_begin_wave(1)
-	_menu_panel.visible = false; _gameover_panel.visible = false; _hud.visible = true
-	_state = State.PLAYING; _refresh_hud()
-
-func _begin_wave(w: int) -> void:
-	_wave = w; _to_spawn = 4 + w * 2; _spawn_cd = 0.8
-	_show_banner("WAVE %d • HOSTILES INBOUND" % w, 2.4); _refresh_hud()
-
-func _show_banner(txt: String, dur: float) -> void:
-	_lbl_banner.text = txt; _lbl_banner.visible = true; _banner_timer = dur
-
-func _refresh_hud() -> void:
-	var spec: Dictionary = _player.get_spec()
-	var idx: int = _player.weapon_idx
-	var r_txt := " (RELOADING)" if _player.is_reloading else ""
-	_lbl_hp.text = "HP %d  •  ARMOR %d  •  NADE x%d" % [_player.hp, _player.armor, _player.grenades]
-	_lbl_ammo.text = "%s  %d | %d%s" % [spec["name"], _player.ammo[idx], _player.reserve[idx], r_txt]
-	var c_txt := ("  %dx" % _combo) if _combo > 1 else ""
-	_lbl_wave.text = "WAVE %d  •  $%d%s" % [_wave, _score, c_txt]
-
-func _input(event: InputEvent) -> void:
-	if not _ready_done or _state != State.PLAYING: return
-	var vp_sz := get_viewport().get_visible_rect().size
-	_fire_btn_rect = Rect2(vp_sz.x - 215, vp_sz.y - 255, 118, 105)
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			if _fire_btn_rect.has_point(event.position):
-				_fire_finger = event.index; _player.set_firing(true)
-			elif event.position.x < vp_sz.x * 0.42 and _joy_finger == -1:
-				_joy_finger = event.index; _joy_origin = event.position
-				_joy_ring.position = _joy_origin - _joy_ring.size * 0.5
-				_joy_knob.position = _joy_origin - _joy_knob.size * 0.5
-				_joy_ring.visible = true; _joy_knob.visible = true
-			elif _look_finger == -1:
-				_look_finger = event.index
-		else:
-			if event.index == _fire_finger: _fire_finger = -1; _player.set_firing(false)
-			elif event.index == _joy_finger:
-				_joy_finger = -1; _joy_ring.visible = false; _joy_knob.visible = false; _player.set_move_vector(Vector2.ZERO)
-			elif event.index == _look_finger: _look_finger = -1
-	elif event is InputEventScreenDrag:
-		if event.index == _joy_finger:
-			var diff := event.position - _joy_origin
-			if diff.length() > 54.0: diff = diff.normalized() * 54.0
-			_joy_knob.position = _joy_origin + diff - _joy_knob.size * 0.5
-			_player.set_move_vector(diff / 54.0)
-		elif event.index == _look_finger:
-			_player.add_look_delta(event.relative)
-
-func _process(delta: float) -> void:
-	if not _ready_done: return
-	_lbl_fps.text = "  %d FPS" % Engine.get_frames_per_second()
-	if _banner_timer > 0.0:
-		_banner_timer -= delta
-		if _banner_timer <= 0.0: _lbl_banner.visible = false
-	if _hit_timer > 0.0:
-		_hit_timer -= delta
-		if _hit_timer <= 0.0: _hit_marker.visible = false
-	if _crit_timer > 0.0:
-		_crit_timer -= delta
-		if _crit_timer <= 0.0: _lbl_crit.visible = false
-	if _dmg_timer > 0.0:
-		_dmg_timer -= delta
-		_dmg_vignette.color.a = clampf(_dmg_timer * 1.4, 0.0, 0.45)
-	if _state != State.PLAYING: return
-	if _combo_timer > 0.0:
-		_combo_timer -= delta
-		if _combo_timer <= 0.0: _combo = 1; _refresh_hud()
-
-	var live_count := 0
-	for i in range(_bots.size() - 1, -1, -1):
-		if not is_instance_valid(_bots[i]): _bots.remove_at(i)
-		elif not _bots[i].get_meta("is_dead", false): live_count += 1
-
-	if _to_spawn > 0 and live_count < 6:
-		_spawn_cd -= delta
-		if _spawn_cd <= 0.0:
-			_spawn_cd = 1.6; _spawn_bot(); _to_spawn -= 1
-	elif _to_spawn == 0 and live_count == 0:
-		_score += _wave * 300; _player.heal_and_resupply(); _begin_wave(_wave + 1)
-
-	_update_enemy_shots(delta); _update_tracers(delta); _update_blasts(delta); _update_grenades(delta); _update_pickups(delta)
-
-func _spawn_bot() -> void:
-	var bot: CharacterBody3D = Actors.EnemyBot.new()
-	var roll := randf()
-	var kind := 1 if (_wave >= 2 and roll < 0.30) else (2 if (_wave >= 3 and roll > 0.80) else 0)
-	bot.setup(kind, _wave, _player, _arena.get_blob_texture())
-	bot.add_to_group("bots")
-	var spots := [Vector3(-12, 0.2, -21), Vector3(12, 0.2, -21), Vector3(0, 0.2, -22), Vector3(-21, 0.2, -2), Vector3(21, 0.2, -4)]
-	bot.position = spots[randi() % spots.size()]
-	bot.died.connect(_on_bot_died); bot.fired_at_player.connect(_on_bot_fired)
-	add_child(bot); _bots.append(bot)
-
-func _on_bot_died(bot: Node3D, was_headshot: bool) -> void:
-	_kills += 1; _combo = mini(6, _combo + 1); _combo_timer = 5.0
-	_score += (200 if was_headshot else 120) * _combo
-	if randf() < 0.42: _spawn_pickup(bot.global_position + Vector3(0, 0.45, 0))
-	_r
+func _cycle_preset() -> void:
+	_gfx_preset = (_gfx_preset + 1) % 3
+	if _gfx_preset == 0:
+		_shadows_on = false; _fog_on = false; _msaa_on = false; _fps_cap = 60
+	elif _gfx_preset == 1:
+		_shadows_on = true; _fog_on = true; _ms
