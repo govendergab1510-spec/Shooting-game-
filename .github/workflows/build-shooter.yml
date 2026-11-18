@@ -43,12 +43,19 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Install Android Platform 35 & Build Tools
+      - name: Setup Android Platform 35 & Build Tools
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMGR="${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
+            SDKMGR="$(command -v sdkmanager)"
+          fi
+          echo "ANDROID_HOME=${SDK_DIR}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> $GITHUB_ENV
+          echo "${SDK_DIR}/platform-tools" >> $GITHUB_PATH
+          echo "${SDK_DIR}/build-tools/35.0.1" >> $GITHUB_PATH
+          yes | "$SDKMGR" --licenses >/dev/null || true
+          "$SDKMGR" "platform-tools" "platforms;android-35" "build-tools;35.0.1"
 
       - name: Cache Godot Engine
         id: cache-godot
@@ -93,6 +100,7 @@ jobs:
           GODOT_ANDROID_SDK_PATH: ${{ env.ANDROID_HOME }}
         run: |
           ~/godot-bin/Godot_v${{ env.GODOT_TAG }}_linux.x86_64 --headless --export-debug "Android" "build/${{ env.APK_NAME }}"
+          ls -lh build/*.apk
 
       - uses: actions/upload-artifact@v4
         with:
