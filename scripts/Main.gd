@@ -1,7 +1,5 @@
 extends Node3D
 
-const SAVE_PATH := "user://outpost_save.cfg"
-
 enum State { MENU, PLAYING, GAMEOVER }
 
 var _actors_res = null
@@ -9,23 +7,12 @@ var _ready_done: bool = false
 var _match_active: bool = false
 var _state: State = State.MENU
 var _score: int = 0
-var _best_score: int = 0
-var _best_wave: int = 1
 var _kills: int = 0
 var _combo: int = 1
 var _combo_timer: float = 0.0
 var _wave: int = 1
 var _to_spawn: int = 0
 var _spawn_cd: float = 0.0
-
-var _gfx_preset: int = 1
-var _shadows_on: bool = true
-var _fog_on: bool = true
-var _msaa_on: bool = false
-var _fps_cap: int = 60
-var _show_fps: bool = true
-var _muted: bool = false
-var _sens_idx: int = 1
 
 var _arena: Node3D
 var _player: CharacterBody3D
@@ -34,6 +21,8 @@ var _sun: DirectionalLight3D
 var _rim: DirectionalLight3D
 var _menu_cam: Camera3D
 var _menu_cam_angle: float = 0.0
+var _ui: CanvasLayer
+
 var _bots: Array[Node3D] = []
 var _pickups: Array[Node3D] = []
 var _grenades: Array[Dictionary] = []
@@ -46,116 +35,42 @@ var _joy_origin: Vector2 = Vector2.ZERO
 var _look_finger: int = -1
 var _fire_finger: int = -1
 
-var _ui: CanvasLayer
-var _loading_bg: ColorRect
-var _loading_lbl: Label
-var _menu_panel: PanelContainer
-var _gfx_panel: PanelContainer
-var _gameover_panel: PanelContainer
-var _hud: Control
-var _radar: Control
-var _joy_ring: ColorRect
-var _joy_knob: ColorRect
-var _hit_marker: Control
-var _hit_timer: float = 0.0
-var _dmg_vignette: ColorRect
-var _dmg_timer: float = 0.0
-var _lbl_hp: Label
-var _lbl_ammo: Label
-var _lbl_wave: Label
-var _lbl_fps: Label
-var _lbl_banner: Label
-var _banner_timer: float = 0.0
-var _lbl_crit: Label
-var _crit_timer: float = 0.0
-var _lbl_final: Label
-var _lbl_best: Label
-var _fire_btn_rect: Rect2
-
-var _btn_resume: Button
-var _btn_deploy: Button
-var _btn_autofire: Button
-var _btn_sens: Button
-var _btn_audio: Button
-var _btn_preset: Button
-var _btn_shadows: Button
-var _btn_fog: Button
-var _btn_msaa: Button
-var _btn_fpscap: Button
-var _btn_showfps: Button
-
 func _play_sfx(key: String, vol_db: float = -2.0, jitter: float = 0.05) -> void:
 	var ab := get_node_or_null("/root/AudioBank")
 	if ab != null:
 		ab.play(key, vol_db, jitter)
 
 func _ready() -> void:
-	_ui = CanvasLayer.new()
+	var ui_res = load("res://scripts/GameUI.gd")
+	if ui_res == null:
+		return
+	_ui = ui_res.new()
 	add_child(_ui)
-
-	_loading_bg = ColorRect.new()
-	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_loading_bg.color = Color(0.08, 0.09, 0.12, 1.0)
-	_ui.add_child(_loading_bg)
-
-	_loading_lbl = Label.new()
-	_loading_lbl.text = "OUTPOST ZERO\nLoading Urban Block..."
-	_loading_lbl.set_anchors_preset(Control.PRESET_CENTER)
-	_loading_lbl.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_loading_lbl.grow_vertical = Control.GROW_DIRECTION_BOTH
-	_loading_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_loading_lbl.add_theme_font_size_override("font_size", 28)
-	_loading_lbl.add_theme_color_override("font_color", Color(1.0, 0.58, 0.20))
-	_loading_bg.add_child(_loading_lbl)
-
-	_load_settings()
+	_ui.init_loading()
 	await get_tree().process_frame
 
 	_actors_res = load("res://scripts/Actors.gd")
 	if _actors_res == null:
-		_loading_lbl.text = "ERROR: Could not load Actors.gd"
+		_ui.loading_lbl.text = "ERROR: Failed to load Actors.gd"
 		return
 
 	_setup_env()
-	_loading_lbl.text = "OUTPOST ZERO\nBuilding Poly Haven Street..."
+	_ui.loading_lbl.text = "OUTPOST ZERO\nBuilding Poly Haven Street..."
 	await get_tree().process_frame
+
 	_setup_world()
-	_loading_lbl.text = "OUTPOST ZERO\nPreparing Tactical Gear..."
+	_ui.loading_lbl.text = "OUTPOST ZERO\nPreparing Tactical Gear..."
 	await get_tree().process_frame
+
 	_setup_pools()
-	_setup_ui()
-	_apply_graphics_settings()
-
-	_loading_bg.queue_free()
+	_ui.play_clicked.connect(_start_match)
+	_ui.resume_clicked.connect(_resume_match)
+	_ui.title_clicked.connect(_return_to_title)
+	_ui.pause_clicked.connect(_open_pause_menu)
+	_ui.action_clicked.connect(_on_hud_action)
+	_ui.settings_updated.connect(_apply_settings)
+	_ui.build_ui(_player, _bots, _arena.barrels, _pickups)
 	_ready_done = true
-
-func _load_settings() -> void:
-	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) == OK:
-		_best_score = int(cfg.get_value("stats", "best_score", 0))
-		_best_wave = int(cfg.get_value("stats", "best_wave", 1))
-		_gfx_preset = int(cfg.get_value("gfx", "preset", 1))
-		_shadows_on = bool(cfg.get_value("gfx", "shadows", true))
-		_fog_on = bool(cfg.get_value("gfx", "fog", true))
-		_msaa_on = bool(cfg.get_value("gfx", "msaa", false))
-		_fps_cap = int(cfg.get_value("gfx", "fps_cap", 60))
-		_show_fps = bool(cfg.get_value("gfx", "show_fps", true))
-		_muted = bool(cfg.get_value("audio", "muted", false))
-		_sens_idx = int(cfg.get_value("ctrl", "sens", 1))
-
-func _save_settings() -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("stats", "best_score", _best_score)
-	cfg.set_value("stats", "best_wave", _best_wave)
-	cfg.set_value("gfx", "preset", _gfx_preset)
-	cfg.set_value("gfx", "shadows", _shadows_on)
-	cfg.set_value("gfx", "fog", _fog_on)
-	cfg.set_value("gfx", "msaa", _msaa_on)
-	cfg.set_value("gfx", "fps_cap", _fps_cap)
-	cfg.set_value("gfx", "show_fps", _show_fps)
-	cfg.set_value("audio", "muted", _muted)
-	cfg.set_value("ctrl", "sens", _sens_idx)
-	cfg.save(SAVE_PATH)
 
 func _setup_env() -> void:
 	_sun = DirectionalLight3D.new()
@@ -277,339 +192,361 @@ func _setup_pools() -> void:
 		add_child(bm)
 		_blast_pool.append({"node": bm, "mat": mat, "life": 0.0})
 
-func _setup_ui() -> void:
-	_hud = Control.new()
-	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.visible = false
-	_ui.add_child(_hud)
+func _apply_settings(preset: int, shadows: bool, fog: bool, msaa: bool, fps_cap: int, _show_fps: bool, muted: bool, sens_idx: int, auto_fire: bool) -> void:
+	if _sun != null:
+		_sun.shadow_enabled = shadows
+		_sun.directional_shadow_max_distance = 28.0 if preset == 0 else (34.0 if preset == 1 else 44.0)
+	if _rim != null:
+		_rim.visible = (preset > 0)
+	if _world_env != null and _world_env.environment != null:
+		_world_env.environment.fog_enabled = fog
+	var far_dist := 90.0 if preset == 0 else (140.0 if preset == 1 else 180.0)
+	if _player != null:
+		_player.auto_fire_assist = auto_fire
+		_player.look_sensitivity = [0.0028, 0.0040, 0.0056][sens_idx]
+		if _player.camera != null:
+			_player.camera.far = far_dist
+	if _menu_cam != null:
+		_menu_cam.far = far_dist
+	get_viewport().msaa_3d = Viewport.MSAA_2X if msaa else Viewport.MSAA_DISABLED
+	Engine.max_fps = fps_cap
+	AudioServer.set_bus_mute(0, muted)
 
-	_dmg_vignette = ColorRect.new()
-	_dmg_vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_dmg_vignette.color = Color(0.85, 0.05, 0.05, 0.0)
-	_dmg_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(_dmg_vignette)
+func _on_hud_action(act: String) -> void:
+	if act == "swap":
+		_player.switch_weapon()
+	elif act == "reload":
+		_player.start_reload()
+	elif act == "roll":
+		_player.queue_roll()
+	elif act == "crouch":
+		_player.toggle_crouch()
+	elif act == "jump":
+		_player.queue_jump()
+	elif act == "aim":
+		_player.toggle_ads()
+	elif act == "nade":
+		_player.throw_grenade()
+	elif act == "cam":
+		_player.toggle_camera_mode()
 
-	var top_bar := HBoxContainer.new()
-	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	top_bar.offset_left = 26
-	top_bar.offset_right = -26
-	top_bar.offset_top = 14
-	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(top_bar)
+func _open_pause_menu() -> void:
+	_state = State.MENU
 
-	_lbl_hp = Label.new()
-	_lbl_hp.add_theme_font_size_override("font_size", 22)
-	_lbl_hp.add_theme_color_override("font_color", Color(0.38, 0.96, 0.50))
-	_lbl_hp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top_bar.add_child(_lbl_hp)
+func _resume_match() -> void:
+	_player.camera.current = true
+	_state = State.PLAYING
 
-	_lbl_wave = Label.new()
-	_lbl_wave.add_theme_font_size_override("font_size", 22)
-	_lbl_wave.add_theme_color_override("font_color", Color(0.98, 0.80, 0.28))
-	top_bar.add_child(_lbl_wave)
+func _return_to_title() -> void:
+	_match_active = false
+	_state = State.MENU
+	_menu_cam.current = true
 
-	_lbl_fps = Label.new()
-	_lbl_fps.text = "  60 FPS"
-	_lbl_fps.add_theme_font_size_override("font_size", 16)
-	_lbl_fps.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0))
-	top_bar.add_child(_lbl_fps)
+func _start_match() -> void:
+	for b in _bots:
+		if is_instance_valid(b):
+			b.queue_free()
+	_bots.clear()
+	for s in _shot_pool:
+		s["life"] = 0.0
+		s["node"].visible = false
+	for tr in _tracer_pool:
+		tr["life"] = 0.0
+		tr["node"].visible = false
+	for pk in _pickups:
+		pk.queue_free()
+	_pickups.clear()
+	for g in _grenades:
+		g["node"].queue_free()
+	_grenades.clear()
+	_arena.spawn_barrels()
+	_player.reset_player()
+	_player.camera.current = true
+	_match_active = true
+	_score = 0
+	_kills = 0
+	_combo = 1
+	_combo_timer = 0.0
+	_wave = 1
+	_begin_wave(1)
+	_state = State.PLAYING
+	_refresh_hud()
 
-	var btn_pause := Button.new()
-	btn_pause.text = " ☰ "
-	btn_pause.custom_minimum_size = Vector2(54, 42)
-	btn_pause.pressed.connect(_open_pause_menu)
-	top_bar.add_child(btn_pause)
+func _begin_wave(w: int) -> void:
+	_wave = w
+	_to_spawn = 4 + w * 2
+	_spawn_cd = 0.8
+	_ui.show_banner("WAVE %d • HOSTILES INBOUND" % w, 2.4)
+	_refresh_hud()
 
-	var RadarScript := load("res://scripts/RadarWidget.gd")
-	_radar = RadarScript.new()
-	_radar.position = Vector2(24, 58)
-	_radar.size = Vector2(124, 124)
-	_radar.player_ref = _player
-	_radar.enemies_ref = _bots
-	_radar.barrels_ref = _arena.barrels
-	_radar.pickups_ref = _pickups
-	_radar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(_radar)
+func _refresh_hud() -> void:
+	if _ui == null or _ui.lbl_hp == null:
+		return
+	var spec: Dictionary = _player.get_spec()
+	var idx: int = _player.weapon_idx
+	var r_txt := " (RELOADING)" if _player.is_reloading else ""
+	_ui.lbl_hp.text = "HP %d  •  ARMOR %d  •  NADE x%d" % [_player.hp, _player.armor, _player.grenades]
+	_ui.lbl_ammo.text = "%s  %d | %d%s" % [spec["name"], _player.ammo[idx], _player.reserve[idx], r_txt]
+	var c_txt := ("  %dx" % _combo) if _combo > 1 else ""
+	_ui.lbl_wave.text = "WAVE %d  •  $%d%s" % [_wave, _score, c_txt]
 
-	_lbl_banner = Label.new()
-	_lbl_banner.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_lbl_banner.offset_top = 64
-	_lbl_banner.offset_left = -280
-	_lbl_banner.offset_right = 280
-	_lbl_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_banner.add_theme_font_size_override("font_size", 28)
-	_lbl_banner.add_theme_color_override("font_color", Color(1.0, 0.86, 0.30))
-	_lbl_banner.visible = false
-	_hud.add_child(_lbl_banner)
+func _input(event: InputEvent) -> void:
+	if not _ready_done or _state != State.PLAYING:
+		return
+	var vp_sz := get_viewport().get_visible_rect().size
+	var fire_rect := Rect2(vp_sz.x - 215, vp_sz.y - 255, 118, 105)
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if fire_rect.has_point(event.position):
+				_fire_finger = event.index
+				_player.set_firing(true)
+			elif event.position.x < vp_sz.x * 0.42 and _joy_finger == -1:
+				_joy_finger = event.index
+				_joy_origin = event.position
+				_ui.joy_ring.position = _joy_origin - _ui.joy_ring.size * 0.5
+				_ui.joy_knob.position = _joy_origin - _ui.joy_knob.size * 0.5
+				_ui.joy_ring.visible = true
+				_ui.joy_knob.visible = true
+			elif _look_finger == -1:
+				_look_finger = event.index
+		else:
+			if event.index == _fire_finger:
+				_fire_finger = -1
+				_player.set_firing(false)
+			elif event.index == _joy_finger:
+				_joy_finger = -1
+				_ui.joy_ring.visible = false
+				_ui.joy_knob.visible = false
+				_player.set_move_vector(Vector2.ZERO)
+			elif event.index == _look_finger:
+				_look_finger = -1
+	elif event is InputEventScreenDrag:
+		if event.index == _joy_finger:
+			var diff := event.position - _joy_origin
+			if diff.length() > 54.0:
+				diff = diff.normalized() * 54.0
+			_ui.joy_knob.position = _joy_origin + diff - _ui.joy_knob.size * 0.5
+			_player.set_move_vector(diff / 54.0)
+		elif event.index == _look_finger:
+			_player.add_look_delta(event.relative)
 
-	_lbl_crit = Label.new()
-	_lbl_crit.set_anchors_preset(Control.PRESET_CENTER)
-	_lbl_crit.offset_top = -65
-	_lbl_crit.offset_left = -140
-	_lbl_crit.offset_right = 140
-	_lbl_crit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_crit.add_theme_font_size_override("font_size", 20)
-	_lbl_crit.add_theme_color_override("font_color", Color(1.0, 0.25, 0.25))
-	_lbl_crit.visible = false
-	_hud.add_child(_lbl_crit)
+func _process(delta: float) -> void:
+	if not _ready_done:
+		return
+	_ui.tick_timers(delta, Engine.get_frames_per_second())
 
-	var crosshair := Control.new()
-	crosshair.set_anchors_preset(Control.PRESET_CENTER)
-	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(crosshair)
-	for r in [Rect2(-11, -1, 6, 2), Rect2(5, -1, 6, 2), Rect2(-1, -11, 2, 6), Rect2(-1, 5, 2, 6)]:
-		var cr := ColorRect.new()
-		cr.position = r.position
-		cr.size = r.size
-		cr.color = Color(1.0, 1.0, 1.0, 0.90)
-		cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		crosshair.add_child(cr)
+	if _state == State.MENU and not _match_active and _menu_cam != null:
+		_menu_cam_angle += delta * 0.14
+		_menu_cam.position = Vector3(cos(_menu_cam_angle) * 16.0, 6.8, sin(_menu_cam_angle) * 16.0)
+		_menu_cam.look_at(Vector3(0, 1.4, 0), Vector3.UP)
+		return
 
-	_hit_marker = Control.new()
-	_hit_marker.set_anchors_preset(Control.PRESET_CENTER)
-	_hit_marker.visible = false
-	_hit_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(_hit_marker)
-	for pos in [Vector2(-10, -10), Vector2(6, -10), Vector2(-10, 6), Vector2(6, 6)]:
-		var hm := ColorRect.new()
-		hm.position = pos
-		hm.size = Vector2(4, 4)
-		hm.color = Color(1.0, 0.35, 0.20)
-		hm.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_hit_marker.add_child(hm)
+	if _state != State.PLAYING:
+		return
+	if _combo_timer > 0.0:
+		_combo_timer -= delta
+		if _combo_timer <= 0.0:
+			_combo = 1
+			_refresh_hud()
 
-	_lbl_ammo = Label.new()
-	_lbl_ammo.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_lbl_ammo.offset_left = 26
-	_lbl_ammo.offset_bottom = -20
-	_lbl_ammo.offset_top = -64
-	_lbl_ammo.add_theme_font_size_override("font_size", 24)
-	_lbl_ammo.add_theme_color_override("font_color", Color(0.95, 0.96, 1.0))
-	_hud.add_child(_lbl_ammo)
+	var live_count := 0
+	for i in range(_bots.size() - 1, -1, -1):
+		if not is_instance_valid(_bots[i]):
+			_bots.remove_at(i)
+		elif not _bots[i].get_meta("is_dead", false):
+			live_count += 1
 
-	_joy_ring = ColorRect.new()
-	_joy_ring.size = Vector2(128, 128)
-	_joy_ring.color = Color(1, 1, 1, 0.14)
-	_joy_ring.visible = false
-	_joy_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(_joy_ring)
+	if _to_spawn > 0 and live_count < 6:
+		_spawn_cd -= delta
+		if _spawn_cd <= 0.0:
+			_spawn_cd = 1.6
+			_spawn_bot()
+			_to_spawn -= 1
+	elif _to_spawn == 0 and live_count == 0:
+		_score += _wave * 300
+		_player.heal_and_resupply()
+		_begin_wave(_wave + 1)
 
-	_joy_knob = ColorRect.new()
-	_joy_knob.size = Vector2(48, 48)
-	_joy_knob.color = Color(1.0, 0.62, 0.18, 0.65)
-	_joy_knob.visible = false
-	_joy_knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(_joy_knob)
+	_update_enemy_shots(delta)
+	_update_tracers(delta)
+	_update_blasts(delta)
+	_update_grenades(delta)
+	_update_pickups(delta)
 
-	_add_action_btn("SWAP", Vector2(-354, -98), Vector2(80, 64), _player.switch_weapon)
-	_add_action_btn("RELOAD", Vector2(-266, -98), Vector2(80, 64), _player.start_reload)
-	_add_action_btn("ROLL", Vector2(-178, -98), Vector2(80, 64), _player.queue_roll)
-	_add_action_btn("CROUCH", Vector2(-90, -98), Vector2(76, 64), _player.toggle_crouch)
-	_add_action_btn("JUMP", Vector2(-90, -176), Vector2(76, 70), _player.queue_jump)
-	_add_action_btn("AIM", Vector2(-90, -255), Vector2(76, 70), _player.toggle_ads)
-	_add_action_btn("NADE", Vector2(-310, -176), Vector2(84, 62), _player.throw_grenade)
-	_add_action_btn("CAM", Vector2(-310, -246), Vector2(84, 62), _player.toggle_camera_mode)
+func _spawn_bot() -> void:
+	var bot: CharacterBody3D = _actors_res.EnemyBot.new()
+	var roll := randf()
+	var kind := 1 if (_wave >= 2 and roll < 0.30) else (2 if (_wave >= 3 and roll > 0.80) else 0)
+	bot.setup(kind, _wave, _player, _arena.get_blob_texture())
+	bot.add_to_group("bots")
+	var spots := [Vector3(-12, 0.2, -21), Vector3(12, 0.2, -21), Vector3(0, 0.2, -22), Vector3(-21, 0.2, -2), Vector3(21, 0.2, -4)]
+	bot.position = spots[randi() % spots.size()]
+	bot.died.connect(_on_bot_died)
+	bot.fired_at_player.connect(_on_bot_fired)
+	add_child(bot)
+	_bots.append(bot)
 
-	var fire_panel := ColorRect.new()
-	fire_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	fire_panel.offset_left = -215
-	fire_panel.offset_right = -97
-	fire_panel.offset_top = -255
-	fire_panel.offset_bottom = -150
-	fire_panel.color = Color(1.0, 0.42, 0.12, 0.52)
-	fire_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(fire_panel)
+func _on_bot_died(bot: Node3D, was_headshot: bool) -> void:
+	_kills += 1
+	_combo = mini(6, _combo + 1)
+	_combo_timer = 5.0
+	_score += (200 if was_headshot else 120) * _combo
+	if randf() < 0.42:
+		_spawn_pickup(bot.global_position + Vector3(0, 0.45, 0))
+	_refresh_hud()
 
-	var fire_lbl := Label.new()
-	fire_lbl.text = "FIRE"
-	fire_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
-	fire_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	fire_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	fire_lbl.add_theme_font_size_override("font_size", 22)
-	fire_panel.add_child(fire_lbl)
+func _on_hit_confirmed(is_headshot: bool, is_kill: bool) -> void:
+	_ui.show_hit(is_headshot, is_kill)
 
-	# --- MAIN MENU ---
-	_menu_panel = _make_panel(540)
-	_ui.add_child(_menu_panel)
-	var mv := _menu_panel.get_node("VBox") as VBoxContainer
-	var title := Label.new()
-	title.text = "OUTPOST ZERO"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 36)
-	title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.18))
-	mv.add_child(title)
+func _on_bot_fired(origin: Vector3, dir: Vector3) -> void:
+	for s in _shot_pool:
+		if s["life"] <= 0.0:
+			var n: Node3D = s["node"]
+			n.position = origin
+			n.visible = true
+			s["vel"] = dir * 24.0
+			s["life"] = 2.2
+			return
 
-	_lbl_best = Label.new()
-	_lbl_best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_best.add_theme_font_size_override("font_size", 15)
-	_lbl_best.add_theme_color_override("font_color", Color(0.80, 0.90, 1.0))
-	mv.add_child(_lbl_best)
+func _update_enemy_shots(delta: float) -> void:
+	for s in _shot_pool:
+		if s["life"] <= 0.0:
+			continue
+		s["life"] -= delta
+		var n: Node3D = s["node"]
+		var next_pos := n.position + s["vel"] * delta
+		var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(n.position, next_pos, 1 | 16))
+		if not hit.is_empty():
+			if hit["collider"] == _player:
+				_player.take_damage(12)
+				_ui.flash_damage()
+			s["life"] = 0.0
+		n.position = next_pos
+		if s["life"] <= 0.0:
+			n.visible = false
 
-	_btn_resume = Button.new()
-	_btn_resume.text = "RESUME MATCH"
-	_btn_resume.custom_minimum_size = Vector2(0, 50)
-	_btn_resume.visible = false
-	_btn_resume.pressed.connect(_resume_match)
-	mv.add_child(_btn_resume)
+func on_barrel_shot(barrel_node: Node3D) -> void:
+	_arena.trigger_barrel(barrel_node)
 
-	_btn_deploy = Button.new()
-	_btn_deploy.text = "PLAY"
-	_btn_deploy.custom_minimum_size = Vector2(0, 54)
-	_btn_deploy.add_theme_font_size_override("font_size", 22)
-	_btn_deploy.pressed.connect(_start_match)
-	mv.add_child(_btn_deploy)
+func _spawn_grenade(origin: Vector3, vel: Vector3) -> void:
+	var m := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.13
+	sm.height = 0.26
+	m.mesh = sm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.20, 0.42, 0.22)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.2, 0.1)
+	mat.emission_energy_multiplier = 2.0
+	m.material_override = mat
+	m.position = origin
+	add_child(m)
+	_grenades.append({"node": m, "vel": vel, "fuse": 1.35})
 
-	var btn_gfx := Button.new()
-	btn_gfx.text = "GRAPHICS SETTINGS"
-	btn_gfx.custom_minimum_size = Vector2(0, 46)
-	btn_gfx.pressed.connect(_on_open_gfx)
-	mv.add_child(btn_gfx)
+func _update_grenades(delta: float) -> void:
+	for i in range(_grenades.size() - 1, -1, -1):
+		var g := _grenades[i]
+		g["fuse"] -= delta
+		g["vel"].y -= 18.0 * delta
+		var n: Node3D = g["node"]
+		var next_pos := n.position + g["vel"] * delta
+		var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(n.position, next_pos, 1))
+		if not hit.is_empty():
+			g["vel"] = g["vel"].bounce(hit["normal"]) * 0.45
+			next_pos = hit["position"] + hit["normal"] * 0.14
+		if next_pos.y < 0.14:
+			next_pos.y = 0.14
+			g["vel"].y = absf(g["vel"].y) * 0.42
+			g["vel"].x *= 0.72
+			g["vel"].z *= 0.72
+		n.position = next_pos
+		if g["fuse"] <= 0.0:
+			var pos := n.position
+			n.queue_free()
+			_grenades.remove_at(i)
+			_play_sfx("explosion", 1.5, 0.05)
+			_on_blast(pos, 8.5, 220)
 
-	var ctrl_row := HBoxContainer.new()
-	ctrl_row.add_theme_constant_override("separation", 8)
-	mv.add_child(ctrl_row)
+func _on_blast(pos: Vector3, radius: float, dmg: int) -> void:
+	for b in _blast_pool:
+		if b["life"] <= 0.0:
+			var n: Node3D = b["node"]
+			n.position = pos
+			n.scale = Vector3.ONE
+			n.visible = true
+			b["life"] = 0.45
+			break
+	for bot in _bots:
+		if is_instance_valid(bot) and not bot.get_meta("is_dead", false) and bot.global_position.distance_to(pos) <= radius:
+			bot.take_damage(dmg, false)
+	for barrel in _arena.barrels:
+		if is_instance_valid(barrel) and not barrel.get_meta("exploded", false) and barrel.global_position.distance_to(pos) <= radius:
+			_arena.trigger_barrel(barrel)
 
-	_btn_autofire = Button.new()
-	_btn_autofire.custom_minimum_size = Vector2(0, 44)
-	_btn_autofire.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_autofire.pressed.connect(_on_toggle_autofire)
-	ctrl_row.add_child(_btn_autofire)
+func _update_blasts(delta: float) -> void:
+	for b in _blast_pool:
+		if b["life"] <= 0.0:
+			continue
+		b["life"] -= delta
+		var n: Node3D = b["node"]
+		var m: StandardMaterial3D = b["mat"]
+		var t := 1.0 - clampf(float(b["life"]) / 0.45, 0.0, 1.0)
+		n.scale = Vector3.ONE * (1.0 + t * 7.0)
+		m.albedo_color.a = (1.0 - t) * 0.85
+		if b["life"] <= 0.0:
+			n.visible = false
 
-	_btn_sens = Button.new()
-	_btn_sens.custom_minimum_size = Vector2(0, 44)
-	_btn_sens.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_sens.pressed.connect(_on_cycle_sens)
-	ctrl_row.add_child(_btn_sens)
+func _spawn_tracer(start_pt: Vector3, end_pt: Vector3) -> void:
+	var dist := start_pt.distance_to(end_pt)
+	if dist < 0.25:
+		return
+	var dir := (end_pt - start_pt).normalized()
+	var up_vec := Vector3.FORWARD if absf(dir.y) > 0.98 else Vector3.UP
+	for tr in _tracer_pool:
+		if tr["life"] <= 0.0:
+			var n: Node3D = tr["node"]
+			n.global_position = (start_pt + end_pt) * 0.5
+			n.look_at(end_pt, up_vec)
+			n.scale = Vector3(1.0, 1.0, dist)
+			n.visible = true
+			tr["life"] = 0.055
+			return
 
-	_btn_audio = Button.new()
-	_btn_audio.custom_minimum_size = Vector2(0, 44)
-	_btn_audio.pressed.connect(_on_toggle_audio)
-	mv.add_child(_btn_audio)
+func _update_tracers(delta: float) -> void:
+	for tr in _tracer_pool:
+		if tr["life"] <= 0.0:
+			continue
+		tr["life"] -= delta
+		if tr["life"] <= 0.0:
+			tr["node"].visible = false
 
-	# --- GRAPHICS SETTINGS ---
-	_gfx_panel = _make_panel(540)
-	_gfx_panel.visible = false
-	_ui.add_child(_gfx_panel)
-	var gv_set := _gfx_panel.get_node("VBox") as VBoxContainer
-	var gfx_title := Label.new()
-	gfx_title.text = "GRAPHICS SETTINGS"
-	gfx_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	gfx_title.add_theme_font_size_override("font_size", 28)
-	gfx_title.add_theme_color_override("font_color", Color(1.0, 0.55, 0.18))
-	gv_set.add_child(gfx_title)
+func _spawn_pickup(pos: Vector3) -> void:
+	var m := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.45, 0.35, 0.45)
+	m.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.18, 0.92, 0.45)
+	mat.emission_enabled = true
+	mat.emission = Color(0.18, 0.92, 0.45)
+	mat.emission_energy_multiplier = 1.8
+	m.material_override = mat
+	m.position = pos
+	add_child(m)
+	_pickups.append(m)
 
-	_btn_preset = Button.new()
-	_btn_preset.custom_minimum_size = Vector2(0, 46)
-	_btn_preset.pressed.connect(_cycle_preset)
-	gv_set.add_child(_btn_preset)
+func _update_pickups(delta: float) -> void:
+	for i in range(_pickups.size() - 1, -1, -1):
+		var p := _pickups[i]
+		p.rotate_y(delta * 2.2)
+		if p.global_position.distance_to(_player.global_position + Vector3(0, 0.8, 0)) < 1.9:
+			_player.heal_and_resupply()
+			_play_sfx("reload", -6.0, 0.05)
+			p.queue_free()
+			_pickups.remove_at(i)
 
-	var g_row1 := HBoxContainer.new()
-	g_row1.add_theme_constant_override("separation", 8)
-	gv_set.add_child(g_row1)
-
-	_btn_shadows = Button.new()
-	_btn_shadows.custom_minimum_size = Vector2(0, 44)
-	_btn_shadows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_shadows.pressed.connect(_on_toggle_shadows)
-	g_row1.add_child(_btn_shadows)
-
-	_btn_fog = Button.new()
-	_btn_fog.custom_minimum_size = Vector2(0, 44)
-	_btn_fog.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_fog.pressed.connect(_on_toggle_fog)
-	g_row1.add_child(_btn_fog)
-
-	var g_row2 := HBoxContainer.new()
-	g_row2.add_theme_constant_override("separation", 8)
-	gv_set.add_child(g_row2)
-
-	_btn_msaa = Button.new()
-	_btn_msaa.custom_minimum_size = Vector2(0, 44)
-	_btn_msaa.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_msaa.pressed.connect(_on_toggle_msaa)
-	g_row2.add_child(_btn_msaa)
-
-	_btn_fpscap = Button.new()
-	_btn_fpscap.custom_minimum_size = Vector2(0, 44)
-	_btn_fpscap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_btn_fpscap.pressed.connect(_on_toggle_fpscap)
-	g_row2.add_child(_btn_fpscap)
-
-	_btn_showfps = Button.new()
-	_btn_showfps.custom_minimum_size = Vector2(0, 44)
-	_btn_showfps.pressed.connect(_on_toggle_showfps)
-	gv_set.add_child(_btn_showfps)
-
-	var btn_back := Button.new()
-	btn_back.text = "SAVE & BACK"
-	btn_back.custom_minimum_size = Vector2(0, 48)
-	btn_back.add_theme_font_size_override("font_size", 18)
-	btn_back.pressed.connect(_on_close_gfx)
-	gv_set.add_child(btn_back)
-
-	# --- GAME OVER ---
-	_gameover_panel = _make_panel(520)
-	_gameover_panel.visible = false
-	_ui.add_child(_gameover_panel)
-	var gv := _gameover_panel.get_node("VBox") as VBoxContainer
-	var go_lbl := Label.new()
-	go_lbl.text = "WASTED"
-	go_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	go_lbl.add_theme_font_size_override("font_size", 40)
-	go_lbl.add_theme_color_override("font_color", Color(0.95, 0.20, 0.20))
-	gv.add_child(go_lbl)
-
-	_lbl_final = Label.new()
-	_lbl_final.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_final.add_theme_font_size_override("font_size", 22)
-	gv.add_child(_lbl_final)
-
-	var btn_retry := Button.new()
-	btn_retry.text = "RESPAWN"
-	btn_retry.custom_minimum_size = Vector2(0, 52)
-	btn_retry.pressed.connect(_start_match)
-	gv.add_child(btn_retry)
-
-	var btn_go_menu := Button.new()
-	btn_go_menu.text = "MAIN MENU"
-	btn_go_menu.custom_minimum_size = Vector2(0, 46)
-	btn_go_menu.pressed.connect(_return_to_title)
-	gv.add_child(btn_go_menu)
-
-	_refresh_menu_labels()
-
-func _on_open_gfx() -> void:
-	_menu_panel.visible = false
-	_gfx_panel.visible = true
-
-func _on_close_gfx() -> void:
-	_save_settings()
-	_gfx_panel.visible = false
-	_menu_panel.visible = true
-
-func _on_toggle_autofire() -> void:
-	_player.auto_fire_assist = not _player.auto_fire_assist
-	_refresh_menu_labels()
-
-func _on_cycle_sens() -> void:
-	_sens_idx = (_sens_idx + 1) % 3
-	_apply_graphics_settings()
-	_save_settings()
-
-func _on_toggle_audio() -> void:
-	_muted = not _muted
-	_apply_graphics_settings()
-	_save_settings()
-
-func _on_toggle_shadows() -> void:
-	_shadows_on = not _shadows_on
-	_apply_graphics_settings()
-	_save_settings()
-
-func _on_toggle_fog() -> void:
-	_fog_on = not _fog_on
-	_apply_graphics_settings()
-	_save_settings()
-
-
+func _on_player_died() -> void:
+	_match_active = false
+	_state = State.GAMEOVER
+	_ui.show_gameover(_wave, _kills, _score)
