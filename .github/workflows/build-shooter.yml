@@ -86,7 +86,7 @@ jobs:
           GODOT_BIN=~/godot-bin/Godot_v${{ env.GODOT_TAG }}_linux.x86_64
           "$GODOT_BIN" --headless --import
 
-          for s in scripts/AudioBank.gd scripts/SoldierVisual.gd scripts/RadarWidget.gd scripts/Actors.gd scripts/Main.gd; do
+          for s in scripts/AudioBank.gd scripts/SoldierVisual.gd scripts/RadarWidget.gd scripts/Actors.gd scripts/GameUI.gd scripts/Main.gd; do
             echo "Checking $s..."
             "$GODOT_BIN" --headless --path . --check-only --script "res://$s"
           done
