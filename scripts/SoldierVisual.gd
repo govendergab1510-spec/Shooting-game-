@@ -7,11 +7,7 @@ var _current_locomotion: String = ""
 var _action_timer: float = 0.0
 var _is_dead: bool = false
 
-static var _cached_ual2_lib: AnimationLibrary = null
-static var _ual2_checked: bool = false
-
 const UAL1_PATH := "res://assets/animations/UAL1_Standard.glb"
-const UAL2_PATH := "res://assets/animations/UAL2_Standard.glb"
 const BACKUP_PATH := "res://assets/models/Soldier.glb"
 
 func build_soldier(uniform_col: Color, armor_col: Color, visor_col: Color, scale_mult: float = 1.0) -> void:
@@ -29,7 +25,6 @@ func build_soldier(uniform_col: Color, armor_col: Color, visor_col: Color, scale
 			anim_player = _find_anim_player(model)
 			var skel := _find_skeleton(model)
 			if anim_player != null:
-				_merge_ual2_library(skel)
 				_index_animations()
 			_attach_tactical_gear(skel, model, armor_col, visor_col)
 			loaded = true
@@ -54,36 +49,6 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 		if res != null:
 			return res
 	return null
-
-func _merge_ual2_library(target_skel: Skeleton3D) -> void:
-	if _ual2_checked:
-		if _cached_ual2_lib != null and not anim_player.has_animation_library("ual2"):
-			anim_player.add_animation_library("ual2", _cached_ual2_lib)
-		return
-	_ual2_checked = true
-	if not ResourceLoader.exists(UAL2_PATH) or target_skel == null:
-		return
-	var p2 := load(UAL2_PATH)
-	if not (p2 is PackedScene):
-		return
-	var inst: Node3D = p2.instantiate()
-	var ap2 := _find_anim_player(inst)
-	if ap2 != null and ap2.has_animation_library(""):
-		var root_node := anim_player.get_node(anim_player.root_node)
-		var target_skel_path := String(root_node.get_path_to(target_skel))
-		var lib := ap2.get_animation_library("").duplicate(true) as AnimationLibrary
-		for anim_name in lib.get_animation_list():
-			var anim := lib.get_animation(anim_name)
-			if anim == null:
-				continue
-			for t in range(anim.get_track_count()):
-				var tp := String(anim.track_get_path(t))
-				var colon := tp.find(":")
-				if colon != -1:
-					anim.track_set_path(t, NodePath(target_skel_path + tp.substr(colon)))
-		_cached_ual2_lib = lib
-		anim_player.add_animation_library("ual2", _cached_ual2_lib)
-	inst.queue_free()
 
 func _index_animations() -> void:
 	var all_names := anim_player.get_animation_list()
@@ -206,21 +171,14 @@ func _attach_tactical_gear(skel: Skeleton3D, fallback_parent: Node3D, armor_col:
 		skel.add_child(hb)
 		var helmet := MeshInstance3D.new()
 		var hs := SphereMesh.new()
-		hs.radius = 0.135
-		hs.height = 0.18
-		hs.radial_segments = 12
-		hs.rings = 6
-		helmet.mesh = hs
-		helmet.position = Vector3(0, 0.08, 0)
-		helmet.scale = Vector3(1.05, 0.85, 1.12)
+		hs.radius = 0.135; hs.height = 0.18; hs.radial_segments = 12; hs.rings = 6
+		helmet.mesh = hs; helmet.position = Vector3(0, 0.08, 0); helmet.scale = Vector3(1.05, 0.85, 1.12)
 		helmet.material_override = armor_mat
 		hb.add_child(helmet)
 
 		var visor := MeshInstance3D.new()
-		var vb := BoxMesh.new()
-		vb.size = Vector3(0.18, 0.045, 0.06)
-		visor.mesh = vb
-		visor.position = Vector3(0, 0.055, 0.115)
+		var vb := BoxMesh.new(); vb.size = Vector3(0.18, 0.045, 0.06)
+		visor.mesh = vb; visor.position = Vector3(0, 0.055, 0.115)
 		visor.material_override = visor_mat
 		hb.add_child(visor)
 
@@ -230,10 +188,8 @@ func _attach_tactical_gear(skel: Skeleton3D, fallback_parent: Node3D, armor_col:
 		cb.bone_name = chest_bone
 		skel.add_child(cb)
 		var vest := MeshInstance3D.new()
-		var vm := BoxMesh.new()
-		vm.size = Vector3(0.34, 0.34, 0.26)
-		vest.mesh = vm
-		vest.position = Vector3(0, 0.05, 0.01)
+		var vm := BoxMesh.new(); vm.size = Vector3(0.34, 0.34, 0.26)
+		vest.mesh = vm; vest.position = Vector3(0, 0.05, 0.01)
 		vest.material_override = armor_mat
 		cb.add_child(vest)
 
@@ -258,75 +214,27 @@ func _attach_tactical_gear(skel: Skeleton3D, fallback_parent: Node3D, armor_col:
 func _build_carbine_mesh() -> Node3D:
 	var g := Node3D.new()
 	var steel := StandardMaterial3D.new()
-	steel.albedo_color = Color(0.14, 0.15, 0.18)
-	steel.metallic = 0.88
-	steel.roughness = 0.26
-
+	steel.albedo_color = Color(0.14, 0.15, 0.18); steel.metallic = 0.88; steel.roughness = 0.26
 	var grip := StandardMaterial3D.new()
-	grip.albedo_color = Color(0.08, 0.08, 0.09)
-	grip.roughness = 0.72
+	grip.albedo_color = Color(0.08, 0.08, 0.09); grip.roughness = 0.72
 
-	var rec := MeshInstance3D.new()
-	var rm := BoxMesh.new()
-	rm.size = Vector3(0.052, 0.075, 0.32)
-	rec.mesh = rm
-	rec.material_override = steel
-	g.add_child(rec)
-
-	var brl := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.015
-	cm.bottom_radius = 0.017
-	cm.height = 0.38
-	cm.radial_segments = 8
-	brl.mesh = cm
-	brl.rotation_degrees.x = 90.0
-	brl.position = Vector3(0, 0.014, -0.33)
-	brl.material_override = steel
-	g.add_child(brl)
-
-	var mag := MeshInstance3D.new()
-	var mm := BoxMesh.new()
-	mm.size = Vector3(0.036, 0.13, 0.052)
-	mag.mesh = mm
-	mag.position = Vector3(0, -0.085, -0.05)
-	mag.rotation_degrees.x = -12.0
-	mag.material_override = grip
-	g.add_child(mag)
-
-	var stock := MeshInstance3D.new()
-	var sm := BoxMesh.new()
-	sm.size = Vector3(0.042, 0.085, 0.18)
-	stock.mesh = sm
-	stock.position = Vector3(0, -0.01, 0.22)
-	stock.material_override = grip
-	g.add_child(stock)
+	var rec := MeshInstance3D.new(); var rm := BoxMesh.new(); rm.size = Vector3(0.052, 0.075, 0.32)
+	rec.mesh = rm; rec.material_override = steel; g.add_child(rec)
+	var brl := MeshInstance3D.new(); var cm := CylinderMesh.new()
+	cm.top_radius = 0.015; cm.bottom_radius = 0.017; cm.height = 0.38; cm.radial_segments = 8
+	brl.mesh = cm; brl.rotation_degrees.x = 90.0; brl.position = Vector3(0, 0.014, -0.33); brl.material_override = steel; g.add_child(brl)
+	var mag := MeshInstance3D.new(); var mm := BoxMesh.new(); mm.size = Vector3(0.036, 0.13, 0.052)
+	mag.mesh = mm; mag.position = Vector3(0, -0.085, -0.05); mag.rotation_degrees.x = -12.0; mag.material_override = grip; g.add_child(mag)
+	var stock := MeshInstance3D.new(); var sm := BoxMesh.new(); sm.size = Vector3(0.042, 0.085, 0.18)
+	stock.mesh = sm; stock.position = Vector3(0, -0.01, 0.22); stock.material_override = grip; g.add_child(stock)
 	return g
 
 func _build_fallback(ucol: Color, acol: Color, _vcol: Color, scale_mult: float) -> void:
-	var root := Node3D.new()
-	root.scale = Vector3.ONE * scale_mult
-	add_child(root)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = ucol
-	var torso := MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.24
-	cap.height = 1.05
-	torso.mesh = cap
-	torso.position = Vector3(0, 0.95, 0)
-	torso.material_override = mat
-	root.add_child(torso)
-	var mat2 := StandardMaterial3D.new()
-	mat2.albedo_color = acol
-	var head := MeshInstance3D.new()
-	var sp := SphereMesh.new()
-	sp.radius = 0.17
-	sp.height = 0.34
-	head.mesh = sp
-	head.position = Vector3(0, 1.62, 0)
-	head.material_override = mat2
-	root.add_child(head)
-	muzzle_marker = Marker3D.new()
-	muzzle_marker.position = Vector3(0.22, 1.25, -0.6)
-	root.add_child(muzzle_marker)
+	var root := Node3D.new(); root.scale = Vector3.ONE * scale_mult; add_child(root)
+	var mat := StandardMaterial3D.new(); mat.albedo_color = ucol
+	var torso := MeshInstance3D.new(); var cap := CapsuleMesh.new(); cap.radius = 0.24; cap.height = 1.05
+	torso.mesh = cap; torso.position = Vector3(0, 0.95, 0); torso.material_override = mat; root.add_child(torso)
+	var mat2 := StandardMaterial3D.new(); mat2.albedo_color = acol
+	var head := MeshInstance3D.new(); var sp := SphereMesh.new(); sp.radius = 0.17; sp.height = 0.34
+	head.mesh = sp; head.position = Vector3(0, 1.62, 0); head.material_override = mat2; root.add_child(head)
+	muzzle_marker = Marker3D.new(); muzzle_marker.position = Vector3(0.22, 1.25, -0.6); root.add_child(muzzle_marker)
