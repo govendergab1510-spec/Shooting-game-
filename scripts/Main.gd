@@ -4,6 +4,7 @@ const Actors = preload("res://scripts/Actors.gd")
 
 enum State { MENU, PLAYING, GAMEOVER }
 
+var _ready_done: bool = false
 var _state: State = State.MENU
 var _score: int = 0
 var _kills: int = 0
@@ -31,6 +32,8 @@ var _look_finger: int = -1
 var _fire_finger: int = -1
 
 var _ui: CanvasLayer
+var _loading_bg: ColorRect
+var _loading_lbl: Label
 var _menu_panel: PanelContainer
 var _gameover_panel: PanelContainer
 var _hud: Control
@@ -55,16 +58,42 @@ var _btn_quality: Button
 var _fire_btn_rect: Rect2
 
 func _ready() -> void:
+	_ui = CanvasLayer.new()
+	add_child(_ui)
+
+	_loading_bg = ColorRect.new()
+	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_loading_bg.color = Color(0.08, 0.09, 0.12, 1.0)
+	_ui.add_child(_loading_bg)
+
+	_loading_lbl = Label.new()
+	_loading_lbl.text = "OUTPOST ZERO\nLoading Urban Block..."
+	_loading_lbl.set_anchors_preset(Control.PRESET_CENTER)
+	_loading_lbl.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_loading_lbl.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_loading_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_loading_lbl.add_theme_font_size_override("font_size", 28)
+	_loading_lbl.add_theme_color_override("font_color", Color(1.0, 0.58, 0.20))
+	_loading_bg.add_child(_loading_lbl)
+
+	await get_tree().process_frame
 	_setup_env()
+	_loading_lbl.text = "OUTPOST ZERO\nBuilding Poly Haven Street..."
+	await get_tree().process_frame
 	_setup_world()
+	_loading_lbl.text = "OUTPOST ZERO\nPreparing Tactical Gear..."
+	await get_tree().process_frame
 	_setup_pools()
 	_setup_ui()
+
+	_loading_bg.queue_free()
+	_ready_done = true
 
 func _setup_env() -> void:
 	_sun = DirectionalLight3D.new()
 	_sun.rotation_degrees = Vector3(-28.0, 38.0, 0.0)
 	_sun.light_color = Color(1.0, 0.84, 0.64)
-	_sun.light_energy = 1.65
+	_sun.light_energy = 1.60
 	_sun.shadow_enabled = true
 	_sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	_sun.directional_shadow_max_distance = 34.0
@@ -78,30 +107,24 @@ func _setup_env() -> void:
 	add_child(rim)
 
 	var sky := Sky.new()
-	if ResourceLoader.exists("res://assets/polyhaven/sky_1k.hdr"):
-		var pmat := PanoramaSkyMaterial.new()
-		pmat.panorama = load("res://assets/polyhaven/sky_1k.hdr")
-		sky.sky_material = pmat
-	else:
-		var pmat := ProceduralSkyMaterial.new()
-		pmat.sky_top_color = Color(0.18, 0.30, 0.55)
-		pmat.sky_horizon_color = Color(0.95, 0.56, 0.34)
-		sky.sky_material = pmat
+	var pmat := ProceduralSkyMaterial.new()
+	pmat.sky_top_color = Color(0.14, 0.28, 0.56)
+	pmat.sky_horizon_color = Color(0.96, 0.54, 0.26)
+	pmat.sky_curve = 0.18
+	pmat.ground_bottom_color = Color(0.16, 0.14, 0.14)
+	pmat.ground_horizon_color = Color(0.62, 0.38, 0.26)
+	pmat.sun_angle_max = 12.0
+	sky.sky_material = pmat
 
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.85
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.08
-	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.12
-	env.adjustment_saturation = 1.16
-	env.glow_enabled = true
-	env.glow_intensity = 0.36
-	env.glow_bloom = 0.08
-	env.glow_hdr_threshold = 1.15
+	env.ambient_light_energy = 0.78
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.0
+	env.glow_enabled = false
+	env.adjustment_enabled = false
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.84, 0.58, 0.46)
 	env.fog_density = 0.0075
@@ -134,11 +157,9 @@ func _setup_pools() -> void:
 	t_mat.albedo_color = Color(1.0, 0.86, 0.35)
 	for i in range(24):
 		var m := MeshInstance3D.new()
-		m.mesh = t_mesh
-		m.material_override = t_mat
+		m.mesh = t_mesh; m.material_override = t_mat
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		m.visible = false
-		add_child(m)
+		m.visible = false; add_child(m)
 		_tracer_pool.append({"node": m, "life": 0.0})
 
 	var s_mesh := SphereMesh.new()
@@ -150,8 +171,7 @@ func _setup_pools() -> void:
 		var sm := MeshInstance3D.new()
 		sm.mesh = s_mesh; sm.material_override = s_mat
 		sm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		sm.visible = false
-		add_child(sm)
+		sm.visible = false; add_child(sm)
 		_shot_pool.append({"node": sm, "vel": Vector3.ZERO, "life": 0.0})
 
 	var b_mesh := SphereMesh.new()
@@ -165,13 +185,10 @@ func _setup_pools() -> void:
 		mat.albedo_color = Color(1.0, 0.55, 0.15, 0.85)
 		bm.material_override = mat
 		bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		bm.visible = false
-		add_child(bm)
+		bm.visible = false; add_child(bm)
 		_blast_pool.append({"node": bm, "mat": mat, "life": 0.0})
 
 func _setup_ui() -> void:
-	_ui = CanvasLayer.new()
-	add_child(_ui)
 	_hud = Control.new()
 	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -314,11 +331,11 @@ func _setup_ui() -> void:
 	)
 	mv.add_child(_btn_autofire)
 
-	_btn_quality = Button.new(); _btn_quality.text = "GRAPHICS: PS3 SMOOTH (0.85x • Redmi 13C)"; _btn_quality.custom_minimum_size = Vector2(0, 48)
+	_btn_quality = Button.new(); _btn_quality.text = "SHADOWS: ON (Standard)"; _btn_quality.custom_minimum_size = Vector2(0, 48)
 	_btn_quality.pressed.connect(func():
 		_high_quality = not _high_quality
-		get_viewport().scaling_3d_scale = 1.0 if _high_quality else 0.85
-		_btn_quality.text = "GRAPHICS: " + ("NATIVE 720P (1.0x)" if _high_quality else "PS3 SMOOTH (0.85x • Redmi 13C)")
+		_sun.shadow_enabled = not _high_quality
+		_btn_quality.text = "SHADOWS: " + ("OFF (Max FPS)" if _high_quality else "ON (Standard)")
 	)
 	mv.add_child(_btn_quality)
 
@@ -387,7 +404,7 @@ func _refresh_hud() -> void:
 	_lbl_wave.text = "WAVE %d  •  $%d%s" % [_wave, _score, c_txt]
 
 func _input(event: InputEvent) -> void:
-	if _state != State.PLAYING: return
+	if not _ready_done or _state != State.PLAYING: return
 	var vp_sz := get_viewport().get_visible_rect().size
 	_fire_btn_rect = Rect2(vp_sz.x - 215, vp_sz.y - 255, 118, 105)
 	if event is InputEventScreenTouch:
@@ -416,6 +433,7 @@ func _input(event: InputEvent) -> void:
 			_player.add_look_delta(event.relative)
 
 func _process(delta: float) -> void:
+	if not _ready_done: return
 	_lbl_fps.text = "  %d FPS" % Engine.get_frames_per_second()
 	if _banner_timer > 0.0:
 		_banner_timer -= delta
@@ -463,24 +481,4 @@ func _on_bot_died(bot: Node3D, was_headshot: bool) -> void:
 	_kills += 1; _combo = mini(6, _combo + 1); _combo_timer = 5.0
 	_score += (200 if was_headshot else 120) * _combo
 	if randf() < 0.42: _spawn_pickup(bot.global_position + Vector3(0, 0.45, 0))
-	_refresh_hud()
-
-func _on_hit_confirmed(is_headshot: bool, is_kill: bool) -> void:
-	_hit_marker.visible = true; _hit_timer = 0.12
-	if is_headshot:
-		_lbl_crit.text = "HEADSHOT KILL!" if is_kill else "HEADSHOT!"
-		_lbl_crit.visible = true; _crit_timer = 0.75
-
-func _on_bot_fired(origin: Vector3, dir: Vector3) -> void:
-	for s in _shot_pool:
-		if s["life"] <= 0.0:
-			var n: Node3D = s["node"]; n.position = origin; n.visible = true
-			s["vel"] = dir * 24.0; s["life"] = 2.2; return
-
-func _update_enemy_shots(delta: float) -> void:
-	for s in _shot_pool:
-		if s["life"] <= 0.0: continue
-		s["life"] -= delta
-		var n: Node3D = s["node"]; var next_pos := n.position + s["vel"] * delta
-		var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(n.position, next_pos, 1 | 16))
-		if not 
+	_r
