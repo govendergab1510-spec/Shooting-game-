@@ -14,6 +14,11 @@ class ArenaBuilder extends Node3D:
 			_blob_tex = _create_blob_shadow_texture()
 		return _blob_tex
 
+	func _play_sfx(key: String, vol_db: float = -2.0, jitter: float = 0.05) -> void:
+		var ab := get_node_or_null("/root/AudioBank")
+		if ab != null:
+			ab.play(key, vol_db, jitter)
+
 	func add_contact_shadow(parent: Node3D, radius: float = 0.75, alpha: float = 0.55) -> void:
 		var mi := MeshInstance3D.new()
 		var pm := PlaneMesh.new()
@@ -234,7 +239,7 @@ class ArenaBuilder extends Node3D:
 			bounds.position.y = 0.0
 		var cs := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = bounds.size.max(Vector3(0.4, 0.4, 0.4))
+		box.size = Vector3(maxf(bounds.size.x, 0.4), maxf(bounds.size.y, 0.4), maxf(bounds.size.z, 0.4))
 		cs.shape = box
 		cs.position = bounds.get_center()
 		root.add_child(cs)
@@ -260,7 +265,7 @@ class ArenaBuilder extends Node3D:
 		var p := barrel_node.global_position + Vector3(0, 0.6, 0)
 		barrel_node.visible = false
 		barrel_node.collision_layer = 0
-		AudioBank.play("explosion", 1.5, 0.05)
+		_play_sfx("explosion", 1.5, 0.05)
 		barrel_exploded.emit(p, 7.8, 185)
 
 	func _get_bounds(node: Node) -> AABB:
@@ -298,15 +303,28 @@ class EnemyBot extends CharacterBody3D:
 	var _dead: bool = false
 	var _death_timer: float = 0.0
 
+	func _play_sfx(key: String, vol_db: float = -2.0, jitter: float = 0.05) -> void:
+		var ab := get_node_or_null("/root/AudioBank")
+		if ab != null:
+			ab.play(key, vol_db, jitter)
+
 	func setup(kind: int, wave: int, player_ref: Node3D, blob_tex: Texture2D) -> void:
-		bot_type = kind as Archetype
 		target_player = player_ref
-		if bot_type == Archetype.RUSHER:
-			max_hp = 72 + wave * 8; move_speed = 5.4; fire_rate = 1.15
-		elif bot_type == Archetype.JUGGERNAUT:
-			max_hp = 200 + wave * 28; move_speed = 2.7; fire_rate = 0.85
+		if kind == 1:
+			bot_type = Archetype.RUSHER
+			max_hp = 72 + wave * 8
+			move_speed = 5.4
+			fire_rate = 1.15
+		elif kind == 2:
+			bot_type = Archetype.JUGGERNAUT
+			max_hp = 200 + wave * 28
+			move_speed = 2.7
+			fire_rate = 0.85
 		else:
-			max_hp = 95 + wave * 12; move_speed = 3.8; fire_rate = 1.35
+			bot_type = Archetype.TROOPER
+			max_hp = 95 + wave * 12
+			move_speed = 3.8
+			fire_rate = 1.35
 		hp = max_hp
 		_fire_cd = randf_range(0.8, 1.8)
 		set_meta("blob_tex", blob_tex)
@@ -342,9 +360,14 @@ class EnemyBot extends CharacterBody3D:
 		var vcol := Color(1.0, 0.25, 0.15)
 		var scl := 1.0
 		if bot_type == Archetype.RUSHER:
-			ucol = Color(0.32, 0.22, 0.18); acol = Color(0.68, 0.38, 0.12); vcol = Color(1.0, 0.85, 0.15)
+			ucol = Color(0.32, 0.22, 0.18)
+			acol = Color(0.68, 0.38, 0.12)
+			vcol = Color(1.0, 0.85, 0.15)
 		elif bot_type == Archetype.JUGGERNAUT:
-			ucol = Color(0.14, 0.15, 0.18); acol = Color(0.55, 0.12, 0.32); vcol = Color(1.0, 0.12, 0.55); scl = 1.16
+			ucol = Color(0.14, 0.15, 0.18)
+			acol = Color(0.55, 0.12, 0.32)
+			vcol = Color(1.0, 0.12, 0.55)
+			scl = 1.16
 		add_child(_visual)
 		_visual.build_soldier(ucol, acol, vcol, scl)
 
@@ -416,15 +439,31 @@ class EnemyBot extends CharacterBody3D:
 			_strafe_dir = -1.0 if randf() < 0.5 else 1.0
 		var right := dir.cross(Vector3.UP).normalized()
 		var ideal_dist := 3.5 if bot_type == Archetype.RUSHER else 13.0
-		var move_vec := (dir + right * _strafe_dir * 0.35) if dist > ideal_dist + 2.2 else ((-dir * 0.45 + right * _strafe_dir * 0.75) if dist < ideal_dist - 2.2 else right * _strafe_dir)
-		velocity.y = (velocity.y - 22.0 * delta) if not is_on_floor() else 0.0
+		var move_vec := Vector3.ZERO
+		if dist > ideal_dist + 2.2:
+			move_vec = dir + right * _strafe_dir * 0.35
+		elif dist < ideal_dist - 2.2:
+			move_vec = -dir * 0.45 + right * _strafe_dir * 0.75
+		else:
+			move_vec = right * _strafe_dir
+		if not is_on_floor():
+			velocity.y -= 22.0 * delta
+		else:
+			velocity.y = 0.0
 		var flat := move_vec.normalized() * move_speed
 		velocity.x = flat.x
 		velocity.z = flat.z
 		move_and_slide()
 
 		var spd := Vector2(velocity.x, velocity.z).length()
-		_visual.set_locomotion("sprint" if spd > 4.4 else ("jog" if spd > 2.2 else ("walk" if spd > 0.45 else "idle")))
+		if spd > 4.4:
+			_visual.set_locomotion("sprint")
+		elif spd > 2.2:
+			_visual.set_locomotion("jog")
+		elif spd > 0.45:
+			_visual.set_locomotion("walk")
+		else:
+			_visual.set_locomotion("idle")
 
 		_fire_cd -= delta
 		if _fire_cd <= 0.0 and dist < 34.0:
@@ -433,7 +472,7 @@ class EnemyBot extends CharacterBody3D:
 			var target_pt := target_player.global_position + Vector3(0, 1.15, 0)
 			var q := PhysicsRayQueryParameters3D.create(eye, target_pt, 1)
 			if get_world_3d().direct_space_state.intersect_ray(q).is_empty():
-				AudioBank.play("enemy_fire", -7.0, 0.1)
+				_play_sfx("enemy_fire", -7.0, 0.1)
 				_visual.play_action("shoot", 0.25)
 				var shot_dir := (target_pt - eye).normalized()
 				fired_at_player.emit(eye + shot_dir * 0.5, shot_dir)
@@ -480,6 +519,11 @@ class PlayerTPS extends CharacterBody3D:
 	var _flash_timer: float = 0.0
 	var _shake: float = 0.0
 
+	func _play_sfx(key: String, vol_db: float = -2.0, jitter: float = 0.05) -> void:
+		var ab := get_node_or_null("/root/AudioBank")
+		if ab != null:
+			ab.play(key, vol_db, jitter)
+
 	func setup_visual(blob_tex: Texture2D) -> void:
 		var SoldierScript := load("res://scripts/SoldierVisual.gd")
 		_visual = SoldierScript.new()
@@ -497,33 +541,4 @@ class PlayerTPS extends CharacterBody3D:
 		sm.albedo_texture = blob_tex
 		sm.albedo_color = Color(0.02, 0.02, 0.04, 0.55)
 		mi.material_override = sm
-		add_child(mi)
-
-	func _ready() -> void:
-		collision_layer = 16
-		collision_mask = 1
-		var cs := CollisionShape3D.new()
-		var cap := CapsuleShape3D.new()
-		cap.radius = 0.38
-		cap.height = 1.75
-		cs.shape = cap
-		cs.position = Vector3(0, 0.88, 0)
-		add_child(cs)
-		_cam_rig = Node3D.new()
-		_cam_rig.position = Vector3(0.58, 1.56, 0.0)
-		add_child(_cam_rig)
-		_spring = SpringArm3D.new()
-		_spring.collision_mask = 1
-		_spring.spring_length = 2.85
-		_spring.margin = 0.25
-		_cam_rig.add_child(_spring)
-		camera = Camera3D.new()
-		camera.fov = 66.0
-		camera.near = 0.08
-		camera.far = 160.0
-		camera.current = true
-		_spring.add_child(camera)
-		_muzzle_light = OmniLight3D.new()
-		_muzzle_light.light_color = Color(1.0, 0.72, 0.28)
-		_muzzle_light.light_energy = 4.0
-		_muzzle_light.
+		add_child
