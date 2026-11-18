@@ -322,7 +322,7 @@ func _input(event: InputEvent) -> void:
 				_look_finger = -1
 	elif event is InputEventScreenDrag:
 		if event.index == _joy_finger:
-			var diff := event.position - _joy_origin
+			var diff: Vector2 = event.position - _joy_origin
 			if diff.length() > 54.0:
 				diff = diff.normalized() * 54.0
 			_ui.joy_knob.position = _joy_origin + diff - _ui.joy_knob.size * 0.5
@@ -414,7 +414,7 @@ func _update_enemy_shots(delta: float) -> void:
 			continue
 		s["life"] -= delta
 		var n: Node3D = s["node"]
-		var next_pos := n.position + s["vel"] * delta
+		var next_pos: Vector3 = n.position + s["vel"] * delta
 		var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(n.position, next_pos, 1 | 16))
 		if not hit.is_empty():
 			if hit["collider"] == _player:
@@ -450,7 +450,7 @@ func _update_grenades(delta: float) -> void:
 		g["fuse"] -= delta
 		g["vel"].y -= 18.0 * delta
 		var n: Node3D = g["node"]
-		var next_pos := n.position + g["vel"] * delta
+		var next_pos: Vector3 = n.position + g["vel"] * delta
 		var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(n.position, next_pos, 1))
 		if not hit.is_empty():
 			g["vel"] = g["vel"].bounce(hit["normal"]) * 0.45
