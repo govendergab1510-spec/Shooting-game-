@@ -79,11 +79,23 @@ jobs:
           mv /tmp/godot_tpl/templates/* ~/.local/share/godot/export_templates/${{ env.GODOT_TEMPLATE_DIR }}/
           rm -rf templates.tpz /tmp/godot_tpl
 
-      - name: Generate Keystore & Import Assets
+      - name: Generate Keystore, Import & Verify Scripts
         run: |
           mkdir -p ~/.android ~/.config/godot
           keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
-          ~/godot-bin/Godot_v${{ env.GODOT_TAG }}_linux.x86_64 --headless --import
+          GODOT_BIN=~/godot-bin/Godot_v${{ env.GODOT_TAG }}_linux.x86_64
+          "$GODOT_BIN" --headless --import
+
+          for s in scripts/AudioBank.gd scripts/SoldierVisual.gd scripts/RadarWidget.gd scripts/Actors.gd scripts/Main.gd; do
+            echo "Checking $s..."
+            "$GODOT_BIN" --headless --path . --check-only --script "res://$s"
+          done
+          "$GODOT_BIN" --headless --path . --quit 2>&1 | tee /tmp/godot_boot.log
+          if grep -iE "SCRIPT ERROR|Parse Error|Compile Error|Failed to load script" /tmp/godot_boot.log; then
+            echo "Detected Godot script/scene error!"
+            exit 1
+          fi
+
           cat <<EOF > ~/.config/godot/editor_settings-${{ env.GODOT_VERSION }}.tres
           [godot_resource type="EditorSettings" format=3]
 
